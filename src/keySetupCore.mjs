@@ -46,6 +46,14 @@ export const KEY_SETUP_KEYS = Object.freeze([
     tier: 'metered',
   }),
   Object.freeze({
+    id: 'openrouter',
+    title: 'OPENROUTER',
+    unlocks: 'Prompt bar — type commands to the planet (free open-weight model, no mic)',
+    getUrl: 'https://openrouter.ai/keys',
+    envVars: Object.freeze(['OPENROUTER_API_KEY']),
+    tier: 'free',
+  }),
+  Object.freeze({
     id: 'aisstream',
     title: 'AISSTREAM',
     unlocks: 'Live ships, worldwide',

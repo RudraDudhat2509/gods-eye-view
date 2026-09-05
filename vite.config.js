@@ -18,6 +18,8 @@
  *  13. Weather effects — camera-local Open-Meteo observations without news/geocoding overhead
  *  14. Rocket launches — recent Launch Library 2 mission metadata
  *  15. Radio Browser — public-domain station directory and click counting
+ *  16. OpenRouter prompt bar — typed commands dispatched through a free
+ *      open-weight model, sharing the same tool schema as OpenAI voice
  *
  * Also exposes Cesium and Google 3D Tiles API keys to the
  * client via `import.meta.env.*` defines.
@@ -75,6 +77,7 @@ import {
   validTerrainResult,
 } from './src/data/terrainHeightsProxy.js';
 import { VOICE_MODELS, isKnownVoiceTier, resolveVoiceModel } from './src/voice/voiceCost.js';
+import { buildPromptSystemMessage, extractPromptAction, PROMPT_MAX_LENGTH } from './src/voice/promptAction.js';
 
 /** Resolve __dirname for ESM context. */
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -513,6 +516,12 @@ function openAiRateLimiter() {
 function googleRateLimiter() {
   if (_googleRateLimiter === undefined) _googleRateLimiter = makeOptInRateLimiter(process.env.GEV_RATELIMIT_GOOGLE_PER_MIN);
   return _googleRateLimiter;
+}
+let _openRouterRateLimiter;
+/** OpenRouter prompt-bar endpoint (/api/prompt/route). Null = unlimited (default). */
+function openRouterRateLimiter() {
+  if (_openRouterRateLimiter === undefined) _openRouterRateLimiter = makeOptInRateLimiter(process.env.GEV_RATELIMIT_OPENROUTER_PER_MIN);
+  return _openRouterRateLimiter;
 }
 
 /**
@@ -1380,6 +1389,9 @@ const OPENAI_REALTIME_REASONING_DEFAULT = 'low';
 const OPENAI_REALTIME_CONTEXT_TOKENS_DEFAULT = 3000;
 const OPENAI_REALTIME_CONTEXT_RETENTION_DEFAULT = 0.5;
 const OPENAI_HUD_SUMMARY_MODEL_DEFAULT = 'gpt-5-nano';
+// Free open-weight model on OpenRouter — the prompt bar's default so it works
+// with zero billing risk. Override with OPENROUTER_MODEL if this id retires.
+const OPENROUTER_MODEL_DEFAULT = 'qwen/qwen-2.5-72b-instruct:free';
 const REALTIME_DEBUG_LOG_DIR = path.join(__dirname, '.gev-logs');
 const REALTIME_DEBUG_LOG_FILE = path.join(REALTIME_DEBUG_LOG_DIR, 'realtime-conversations.jsonl');
 const REALTIME_DEBUG_LOG_MAX_BYTES = 8 * 1024 * 1024;
@@ -5331,6 +5343,97 @@ export function openAiRealtimeProxy() {
   };
 }
 
+/**
+ * Prompt bar — types a command straight to the same GEV_REALTIME_TOOLS that
+ * voice uses, via a free open-weight model on OpenRouter instead of OpenAI.
+ * Keeps OPENROUTER_API_KEY server-side; the client only ever sees the chosen
+ * {action, args} (or an honest failure), never the model reply or the key.
+ */
+export function openRouterPromptProxy() {
+  function install(middlewares) {
+    middlewares.use('/api/prompt/route', async (req, res) => {
+      if (req.method !== 'POST') {
+        res.statusCode = 405;
+        res.setHeader('Content-Type', 'application/json');
+        res.end(JSON.stringify({ error: 'Method not allowed' }));
+        return;
+      }
+
+      const apiKey = process.env.OPENROUTER_API_KEY;
+      if (!apiKey) {
+        res.statusCode = 503;
+        res.setHeader('Content-Type', 'application/json');
+        res.end(JSON.stringify({ error: 'OPENROUTER_API_KEY is not set' }));
+        return;
+      }
+
+      // Opt-in per-IP throttle (GEV_RATELIMIT_OPENROUTER_PER_MIN). No-op when unset.
+      if (!enforceOptInRateLimit(openRouterRateLimiter(), req, res)) return;
+
+      let prompt;
+      try {
+        const body = await readRequestBody(req, 4 * 1024);
+        prompt = String(JSON.parse(body || '{}').prompt || '').trim().slice(0, PROMPT_MAX_LENGTH);
+      } catch (error) {
+        res.statusCode = 400;
+        res.setHeader('Content-Type', 'application/json');
+        res.end(JSON.stringify({ error: error?.message || 'Invalid request body' }));
+        return;
+      }
+      if (!prompt) {
+        res.statusCode = 400;
+        res.setHeader('Content-Type', 'application/json');
+        res.end(JSON.stringify({ error: 'prompt is required' }));
+        return;
+      }
+
+      try {
+        const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            model: process.env.OPENROUTER_MODEL || OPENROUTER_MODEL_DEFAULT,
+            temperature: 0,
+            messages: [
+              { role: 'system', content: buildPromptSystemMessage(GEV_REALTIME_TOOLS) },
+              { role: 'user', content: prompt },
+            ],
+          }),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          res.statusCode = response.status || 502;
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify({ ok: false, error: data?.error?.message || 'OpenRouter request failed' }));
+          return;
+        }
+        const modelText = data?.choices?.[0]?.message?.content || '';
+        const result = extractPromptAction(modelText, GEV_REALTIME_TOOLS);
+        res.statusCode = 200;
+        res.setHeader('Content-Type', 'application/json');
+        res.end(JSON.stringify(result));
+      } catch (error) {
+        res.statusCode = 502;
+        res.setHeader('Content-Type', 'application/json');
+        res.end(JSON.stringify({ ok: false, error: error?.message || 'OpenRouter request failed' }));
+      }
+    });
+  }
+
+  return {
+    name: 'openrouter-prompt-proxy',
+    configureServer(server) {
+      install(server.middlewares);
+    },
+    configurePreviewServer(server) {
+      install(server.middlewares);
+    },
+  };
+}
+
 function extractOpenAiResponseText(data) {
   if (typeof data?.output_text === 'string' && data.output_text.trim()) {
     return data.output_text.trim();
@@ -7758,6 +7861,7 @@ export default defineConfig(({ mode }) => {
       aisLiveProxy(),
       trackBackfillProxies(),
       openAiRealtimeProxy(),
+      openRouterPromptProxy(),
       googlePlacesContextProxy(),
       keySetupEndpoint(),
     ],

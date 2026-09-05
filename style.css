@@ -422,6 +422,104 @@ body.cockpit-mode #cockpit-cloud-effects.active {
   user-select: text;
 }
 
+/* ── Prompt bar (typed alternative to voice) ──── */
+#gev-prompt-bar {
+  position: fixed;
+  right: 36px;
+  bottom: 88px;
+  z-index: 150;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 280px;
+  padding: 9px 14px;
+  color: var(--text-primary);
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--panel-radius);
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.5),
+    0 0 0 1px rgba(255, 255, 255, 0.03) inset,
+    0 1px 0 rgba(255, 255, 255, 0.06) inset;
+  backdrop-filter: blur(24px) saturate(1.4);
+  -webkit-backdrop-filter: blur(24px) saturate(1.4);
+  font-family: var(--font-mono);
+  pointer-events: auto;
+}
+
+.gev-prompt-kicker {
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: var(--text-dim);
+}
+
+#gev-prompt-form {
+  display: flex;
+  gap: 6px;
+}
+
+#gev-prompt-input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--btn-radius);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+#gev-prompt-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+#gev-prompt-submit {
+  flex: 0 0 auto;
+  padding: 0 12px;
+  color: var(--accent);
+  background: rgba(0, 212, 255, 0.06);
+  border: 1px solid rgba(0, 212, 255, 0.28);
+  border-radius: var(--btn-radius);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  cursor: pointer;
+}
+
+#gev-prompt-submit:hover {
+  color: #ffffff;
+  border-color: var(--accent);
+}
+
+#gev-prompt-submit:disabled,
+#gev-prompt-input:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.gev-prompt-detail {
+  min-height: 12px;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#gev-prompt-bar[data-status='thinking'] .gev-prompt-detail {
+  color: #ffdc78;
+}
+
+#gev-prompt-bar[data-status='success'] .gev-prompt-detail {
+  color: #5cffc6;
+}
+
+#gev-prompt-bar[data-status='error'] .gev-prompt-detail {
+  color: #ff5c6e;
+  white-space: normal;
+}
+
 /* ── Title Bar ────────────────────────────────── */
 #title-bar {
   position: fixed;
